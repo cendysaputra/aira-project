@@ -1,90 +1,41 @@
-# Aira — Virtual Companion
+# Aira
 
-Aira adalah virtual companion bergaya anime witch yang bisa diajak ngobrol. Ditenagai Claude AI, dilengkapi Live2D model interaktif, ekspresi emosi dinamis, dan suara via ElevenLabs TTS.
+Aira is an anime-styled virtual agent you can have natural conversations with. The project combines an interactive Live2D model, Claude-powered AI, and ElevenLabs voice synthesis into a single conversational experience that feels alive.
+
+Aira has a consistent personality, reactive facial expressions, and a voice synchronized with real-time lip movements. Every response triggers matching emotion expressions and body animations. Conversations happen in casual Indonesian, feeling more like chatting with a friend than talking to a formal assistant.
+
+## Features
+
+- Live2D model with physics, motion, and natural idle animations
+- Dynamic emotion expressions
+- Real-time lip sync with TTS audio
+- AI conversation with a defined personality via system prompt
 
 ## Tech Stack
 
-- **React 19 + TypeScript** — UI framework
-- **Vite 8** — build tool
-- **PixiJS 7 + pixi-live2d-display** — rendering Live2D model
-- **Claude API (claude-sonnet-4)** — AI conversation
-- **ElevenLabs API** — text-to-speech
-- **Howler.js** — audio playback
+| Layer            | Technology                              |
+| ---------------- | --------------------------------------- |
+| UI & Framework   | React 19 + TypeScript                   |
+| Build Tool       | Vite 8                                  |
+| Live2D Rendering | PixiJS 7 + pixi-live2d-display          |
+| AI Conversation  | Anthropic Claude API (claude-sonnet-4)  |
+| Text-to-Speech   | ElevenLabs API (eleven_multilingual_v2) |
+| Audio Playback   | Howler.js                               |
 
-## Fitur
-
-- Live2D model dengan fisika dan animasi natural
-- Ekspresi emosi otomatis berdasarkan respons AI (`neutral`, `happy`, `sad`, `excited`, `angry`, `surprised`, `embarrassed`, `sleepy`)
-- Lip sync sinkron dengan audio TTS atau text fallback
-- Percakapan kontekstual dalam bahasa Indonesia casual
-- Motion playback berbasis emosi
-
-## Setup
-
-### 1. Install dependencies
-
-```bash
-npm install
-```
-
-### 2. Konfigurasi environment
-
-Duplikat `.env.example` menjadi `.env` lalu isi dengan API key kamu:
-
-```bash
-cp .env.example .env
-```
-
-```env
-VITE_ANTHROPIC_API_KEY=your_anthropic_api_key_here
-VITE_ELEVENLABS_API_KEY=your_elevenlabs_api_key_here   # opsional
-VITE_ELEVENLABS_VOICE_ID=your_elevenlabs_voice_id_here # opsional
-```
-
-> Tanpa ElevenLabs, Aira tetap bisa berbicara menggunakan text-based lip sync sebagai fallback.
-
-### 3. Tambahkan Live2D model
-
-Letakkan folder model Live2D di:
-
-```
-public/models/
-```
-
-### 4. Jalankan dev server
-
-```bash
-npm run dev
-```
-
-### 5. Build untuk production
-
-```bash
-npm run build
-```
-
-## Struktur Proyek
+## Project Structure
 
 ```
 src/
 ├── components/
-│   ├── Live2DCanvas.tsx     # Rendering canvas Live2D
-│   ├── ChatInput.tsx        # Input percakapan
-│   └── DebugPanel.tsx       # Panel debug (disabled by default)
+│   ├── Live2DCanvas.tsx         # Live2D model canvas rendering
+│   └── ChatInput.tsx            # Chat input & conversation display
 ├── lib/
-│   ├── ai-controller.ts     # Integrasi Claude API & orkestrasi respons
-│   ├── live2d-manager.ts    # Manajemen model Live2D
-│   ├── animation-controller.ts  # Kontrol motion & animasi
-│   ├── expression-manager.ts    # Manajemen ekspresi emosi
-│   └── lipsync-controller.ts    # Lip sync audio & text
-├── config/
-│   ├── expressions.ts       # Definisi emosi & keyword mapping
-│   └── motions.ts           # Konfigurasi motion
-└── types/
-    └── live2d.d.ts          # Type definitions Live2D
+│   ├── ai-controller.ts         # Claude API, emotion & TTS orchestration
+│   ├── live2d-manager.ts        # Model initialization and management
+│   ├── animation-controller.ts  # Motion playback
+│   ├── expression-manager.ts    # Emotion expression switching
+│   └── lipsync-controller.ts    # Audio & text-based lip sync
+└── config/
+    ├── expressions.ts           # Emotion to Live2D expression mapping
+    └── motions.ts               # Motion config per emotion
 ```
-
-## Catatan
-
-- Model Live2D (`mao_pro_en/`) tidak disertakan di repo karena lisensi aset
-- API key tidak boleh di-commit — pastikan `.env` ada di `.gitignore`
