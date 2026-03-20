@@ -17,6 +17,10 @@ type CoreModelLike = {
 
 export class LipSyncController {
   private model: Live2DModel | null = null;
+  private originalInternalModelUpdate:
+    | ((dt: number, now: number) => void)
+    | null = null;
+  private updateHooked = false;
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private audioSource: MediaElementAudioSourceNode | null = null;
@@ -24,7 +28,8 @@ export class LipSyncController {
   private dataArray: Uint8Array | null = null;
   private timeDomainData: Uint8Array | null = null;
   private isSpeaking = false;
-  private animationId: number | null = null;
+  private analysisAnimationId: number | null = null;
+  private closeAnimationId: number | null = null;
   private currentViseme: VisemeWeights = { ...VISEME_SILENT };
   private targetViseme: VisemeWeights = { ...VISEME_SILENT };
   private textTimerId: ReturnType<typeof setTimeout> | null = null;
@@ -40,13 +45,22 @@ export class LipSyncController {
   private readonly SPEAKING_INTENSITY = 1.15;
   private readonly SMILE_VISEME_REDUCTION = 0.72;
   private readonly MOUTH_CORNER_NEUTRALIZE = 0.12;
+  private readonly CLOSED_MOUTH_NEUTRAL = 0;
 
   init(model: Live2DModel): void {
+    if (this.model !== model) {
+      this.unhookModelUpdate();
+    }
+
     this.model = model;
+    this.hookModelUpdate();
     console.log('[LipSync] Controller initialized');
   }
 
-  async speakWithAudio(audioUrl: string, transcriptText = ''): Promise<void> {
+  async speakWithAudio(
+    audioUrl: string,
+    transcriptText = '',
+  ): Promise<void> {
     if (!this.model) {
       return;
     }
@@ -56,6 +70,10 @@ export class LipSyncController {
 
       this.audioElement = new Audio();
       this.audioElement.preload = 'auto';
+      this.audioElement.crossOrigin = 'anonymous';
+      this.audioElement.setAttribute('playsinline', 'true');
+      this.audioElement.muted = false;
+      this.audioElement.volume = 1;
       this.audioElement.src = audioUrl;
       this.audioTextVisemes = this.buildSpeechVisemeTimeline(transcriptText);
 
@@ -84,10 +102,6 @@ export class LipSyncController {
         this.speakingDoneResolver = resolve;
       });
 
-      await this.audioElement.play();
-      console.log('[LipSync] Audio playback started');
-      this.startAudioLipSync();
-
       this.audioElement.onended = () => {
         console.log('[LipSync] Audio playback ended');
         this.onSpeakingDone();
@@ -97,16 +111,24 @@ export class LipSyncController {
         console.error('[LipSync] Audio error:', event);
         this.onSpeakingDone();
       };
+
+      await this.audioElement.play();
+      console.log('[LipSync] Audio playback started');
+      this.startAudioLipSync();
     } catch (error) {
       console.error('[LipSync] speakWithAudio failed:', error);
       this.onSpeakingDone();
+      await this.playAudioWithoutAnalysis(audioUrl);
       return;
     }
 
     await this.speakingPromise;
   }
 
-  async speakWithText(text: string, speedMs = 80): Promise<void> {
+  async speakWithText(
+    text: string,
+    speedMs = 80,
+  ): Promise<void> {
     if (!this.model) {
       return;
     }
@@ -116,7 +138,6 @@ export class LipSyncController {
     animationController.setSpeaking(true);
 
     const visemes = this.textToVisemes(text);
-    this.startVisemeLoop();
 
     for (let index = 0; index < visemes.length; index += 1) {
       if (!this.isSpeaking) {
@@ -135,16 +156,28 @@ export class LipSyncController {
   stopSpeaking(): void {
     this.isSpeaking = false;
 
-    if (this.animationId !== null) {
-      cancelAnimationFrame(this.animationId);
-      this.animationId = null;
+    if (this.analysisAnimationId !== null) {
+      cancelAnimationFrame(this.analysisAnimationId);
+      this.analysisAnimationId = null;
+    }
+
+    if (this.closeAnimationId !== null) {
+      cancelAnimationFrame(this.closeAnimationId);
+      this.closeAnimationId = null;
     }
 
     if (this.audioElement) {
       this.audioElement.pause();
+      this.audioElement.onended = null;
+      this.audioElement.onerror = null;
       this.audioElement.src = '';
       this.audioElement = null;
     }
+
+    this.audioSource?.disconnect();
+    this.audioSource = null;
+    this.analyser?.disconnect();
+    this.analyser = null;
 
     if (this.textTimerId) {
       clearTimeout(this.textTimerId);
@@ -155,7 +188,7 @@ export class LipSyncController {
     this.targetViseme = { ...VISEME_SILENT };
     this.audioEnvelope = 0;
     this.audioTextVisemes = [];
-    this.applyViseme();
+    this.forceApplyViseme();
     animationController.setSpeaking(false);
     this.resolveSpeakingPromise();
   }
@@ -172,6 +205,7 @@ export class LipSyncController {
       this.audioContext = null;
     }
 
+    this.unhookModelUpdate();
     this.model = null;
   }
 
@@ -225,12 +259,10 @@ export class LipSyncController {
         );
       }
 
-      this.lerpViseme();
-      this.applyViseme();
-      this.animationId = requestAnimationFrame(update);
+      this.analysisAnimationId = requestAnimationFrame(update);
     };
 
-    this.animationId = requestAnimationFrame(update);
+    this.analysisAnimationId = requestAnimationFrame(update);
   }
 
   private getAverageFrequency(data: ArrayLike<number>, startBin: number, endBin: number): number {
@@ -330,6 +362,7 @@ export class LipSyncController {
       paramO: Math.min(Math.max(viseme.paramO * 1.45, 0.08), 0.9),
     };
   }
+
 
   private buildSpeechVisemeTimeline(text: string): VisemeWeights[] {
     const timeline: VisemeWeights[] = [];
@@ -481,20 +514,6 @@ export class LipSyncController {
     }
   }
 
-  private startVisemeLoop(): void {
-    const update = () => {
-      if (!this.isSpeaking) {
-        return;
-      }
-
-      this.lerpViseme();
-      this.applyViseme();
-      this.animationId = requestAnimationFrame(update);
-    };
-
-    this.animationId = requestAnimationFrame(update);
-  }
-
   private lerpViseme(): void {
     const speed = this.isSpeaking ? this.LERP_SPEED : this.CLOSE_MOUTH_SPEED;
     this.currentViseme.paramA += (this.targetViseme.paramA - this.currentViseme.paramA) * speed;
@@ -504,7 +523,7 @@ export class LipSyncController {
     this.currentViseme.paramO += (this.targetViseme.paramO - this.currentViseme.paramO) * speed;
   }
 
-  private applyViseme(): void {
+  private forceApplyViseme(): void {
     const coreModel = this.model?.internalModel?.coreModel as CoreModelLike | undefined;
 
     if (!coreModel) {
@@ -522,6 +541,8 @@ export class LipSyncController {
 
     if (this.isSpeaking) {
       this.applySpeakingMouthOverride(coreModel);
+    } else {
+      this.applyClosedMouthOverride(coreModel);
     }
   }
 
@@ -536,13 +557,21 @@ export class LipSyncController {
     coreModel.setParameterValueById('ParamMouthDown', this.MOUTH_CORNER_NEUTRALIZE);
   }
 
+  private applyClosedMouthOverride(coreModel: CoreModelLike): void {
+    coreModel.setParameterValueById('ParamMouthUp', this.CLOSED_MOUTH_NEUTRAL);
+    coreModel.setParameterValueById('ParamMouthDown', this.CLOSED_MOUTH_NEUTRAL);
+    coreModel.setParameterValueById('ParamMouthAngry', this.CLOSED_MOUTH_NEUTRAL);
+    coreModel.setParameterValueById('ParamMouthAngryLine', this.CLOSED_MOUTH_NEUTRAL);
+  }
+
   private onSpeakingDone(): void {
     this.isSpeaking = false;
     this.targetViseme = { ...VISEME_SILENT };
 
     const closeAnimation = () => {
+      this.closeAnimationId = requestAnimationFrame(closeAnimation);
       this.lerpViseme();
-      this.applyViseme();
+      this.forceApplyViseme();
 
       const total =
         Math.abs(this.currentViseme.paramA) +
@@ -551,17 +580,86 @@ export class LipSyncController {
         Math.abs(this.currentViseme.paramE) +
         Math.abs(this.currentViseme.paramO);
 
-      if (total > 0.01) {
-        requestAnimationFrame(closeAnimation);
-      } else {
-        this.applyViseme();
+      if (total <= 0.01) {
+        if (this.closeAnimationId !== null) {
+          cancelAnimationFrame(this.closeAnimationId);
+          this.closeAnimationId = null;
+        }
+
+        this.forceApplyViseme();
         this.resolveSpeakingPromise();
       }
     };
 
-    requestAnimationFrame(closeAnimation);
+    if (this.analysisAnimationId !== null) {
+      cancelAnimationFrame(this.analysisAnimationId);
+      this.analysisAnimationId = null;
+    }
+
+    if (this.closeAnimationId !== null) {
+      cancelAnimationFrame(this.closeAnimationId);
+      this.closeAnimationId = null;
+    }
+
+    this.closeAnimationId = requestAnimationFrame(closeAnimation);
     animationController.setSpeaking(false);
     console.log('[LipSync] Speaking done');
+  }
+
+  private hookModelUpdate(): void {
+    if (!this.model?.internalModel || this.updateHooked) {
+      return;
+    }
+
+    this.originalInternalModelUpdate = this.model.internalModel.update.bind(this.model.internalModel);
+    this.model.internalModel.update = (dt: number, now: number) => {
+      this.originalInternalModelUpdate?.(dt, now);
+      this.onFrameUpdate();
+    };
+    this.updateHooked = true;
+    console.log('[LipSync] Hooked into internal model update loop');
+  }
+
+  private unhookModelUpdate(): void {
+    if (!this.model?.internalModel || !this.updateHooked || !this.originalInternalModelUpdate) {
+      this.originalInternalModelUpdate = null;
+      this.updateHooked = false;
+      return;
+    }
+
+    this.model.internalModel.update = this.originalInternalModelUpdate;
+    this.originalInternalModelUpdate = null;
+    this.updateHooked = false;
+  }
+
+  private onFrameUpdate(): void {
+    if (!this.model) {
+      return;
+    }
+
+    this.lerpViseme();
+    this.forceApplyViseme();
+  }
+
+  private async playAudioWithoutAnalysis(audioUrl: string): Promise<void> {
+    try {
+      const fallbackAudio = new Audio(audioUrl);
+      fallbackAudio.preload = 'auto';
+      fallbackAudio.crossOrigin = 'anonymous';
+      fallbackAudio.setAttribute('playsinline', 'true');
+      fallbackAudio.muted = false;
+      fallbackAudio.volume = 1;
+
+      await fallbackAudio.play();
+      console.warn('[LipSync] Falling back to plain audio playback without analysis');
+
+      await new Promise<void>((resolve) => {
+        fallbackAudio.onended = () => resolve();
+        fallbackAudio.onerror = () => resolve();
+      });
+    } catch (fallbackError) {
+      console.error('[LipSync] Plain audio fallback failed:', fallbackError);
+    }
   }
 
   private resolveSpeakingPromise(): void {

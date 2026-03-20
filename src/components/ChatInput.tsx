@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { aiController } from '../lib/ai-controller';
+import { autoTalkController } from '../lib/autotalk-controller';
 
 export function ChatInput() {
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const finalTranscriptRef = useRef('');
+  const submittedTranscriptRef = useRef('');
+  const isLoadingRef = useRef(false);
+
+  useEffect(() => {
+    isLoadingRef.current = isLoading;
+  }, [isLoading]);
 
   useEffect(() => {
     const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -22,7 +29,9 @@ export function ChatInput() {
 
     recognition.onstart = () => {
       finalTranscriptRef.current = '';
+      submittedTranscriptRef.current = '';
       setIsListening(true);
+      autoTalkController.onUserMessage();
     };
 
     recognition.onresult = (event) => {
@@ -34,6 +43,18 @@ export function ChatInput() {
 
         if (result.isFinal) {
           finalTranscriptRef.current = `${finalTranscriptRef.current} ${transcript}`.trim();
+
+          const finalTranscript = finalTranscriptRef.current.trim();
+          if (
+            finalTranscript &&
+            finalTranscript !== submittedTranscriptRef.current &&
+            !isLoadingRef.current
+          ) {
+            submittedTranscriptRef.current = finalTranscript;
+            recognition.stop();
+            void handleSend(finalTranscript);
+            return;
+          }
         } else {
           interimTranscript = transcript;
         }
@@ -46,14 +67,19 @@ export function ChatInput() {
       setIsListening(false);
     };
 
+    (recognition as SpeechRecognition & { onnomatch?: () => void }).onnomatch = () => {
+      setIsListening(false);
+    };
+
     recognition.onend = () => {
       setIsListening(false);
 
       const transcript = finalTranscriptRef.current.trim();
-      if (!transcript) {
+      if (!transcript || transcript === submittedTranscriptRef.current) {
         return;
       }
 
+      submittedTranscriptRef.current = transcript;
       void handleSend(transcript);
     };
 
@@ -63,7 +89,7 @@ export function ChatInput() {
       recognition.stop();
       recognitionRef.current = null;
     };
-  }, [isLoading]);
+  }, []);
 
   const handleSend = async (text: string) => {
     const trimmedInput = text.trim();
