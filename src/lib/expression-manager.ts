@@ -1,4 +1,4 @@
-import type { Live2DModel } from 'pixi-live2d-display/cubism4';
+import type { Live2DModel } from 'pixi-live2d-display-lipsyncpatch/cubism4';
 import {
   DEFAULT_EMOTION,
   EXPRESSION_AUTO_REVERT_MS,

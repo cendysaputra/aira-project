@@ -5,6 +5,7 @@ import {
 } from '../config/expressions';
 import { animationController } from './animation-controller';
 import { expressionManager } from './expression-manager';
+import { gestureController } from './gesture-controller';
 import { lipSyncController } from './lipsync-controller';
 
 interface ChatMessage {
@@ -12,7 +13,7 @@ interface ChatMessage {
   content: string;
 }
 
-export interface AiraResponse {
+export interface YukiResponse {
   text: string;
   emotion: EmotionType;
 }
@@ -46,24 +47,17 @@ const INTRO_PATTERNS = [
   'hai',
 ];
 
-const AIRA_INSULT_PATTERNS = ['aira jelek', 'aira ugly', 'aira itu jelek'];
+const YUKI_INSULT_PATTERNS = ['yuki jelek', 'yuki ugly', 'yuki itu jelek'];
 
 export class AIController {
   private conversationHistory: ChatMessage[] = [];
   private isProcessing = false;
   private motionPlayCount = 0;
-
   private anthropicApiKey = import.meta.env.VITE_ANTHROPIC_API_KEY || '';
   private elevenLabsApiKey = import.meta.env.VITE_ELEVENLABS_API_KEY || '';
   private elevenLabsVoiceId = import.meta.env.VITE_ELEVENLABS_VOICE_ID || '';
   private ttsEnabled = Boolean(this.elevenLabsApiKey && this.elevenLabsVoiceId);
-  private readonly TTS_SETTINGS = {
-    stability: 0.38,
-    similarity_boost: 0.9,
-    style: 0.18,
-    use_speaker_boost: true,
-  };
-
+  private currentEmotion: EmotionType = 'neutral';
   constructor() {
     if (!this.anthropicApiKey) {
       console.warn('[AI] VITE_ANTHROPIC_API_KEY not set');
@@ -75,7 +69,7 @@ export class AIController {
     }
   }
 
-  async sendMessage(userMessage: string): Promise<AiraResponse> {
+  async sendMessage(userMessage: string): Promise<YukiResponse> {
     if (this.isProcessing) {
       return {
         text: 'Tunggu sebentar ya, aku masih mikir...',
@@ -100,7 +94,9 @@ export class AIController {
       const { text, emotion } = this.parseResponse(rawResponse);
       this.conversationHistory.push({ role: 'assistant', content: rawResponse });
 
+      this.currentEmotion = emotion;
       await expressionManager.setEmotion(emotion, false);
+      gestureController.playFromText(text, emotion);
       this.maybePlayMotion(emotion);
       await this.speakText(text);
 
@@ -111,24 +107,42 @@ export class AIController {
       return { text, emotion };
     } catch (error) {
       console.error('[AI] Error:', error);
-      void expressionManager.setEmotion('sad');
-
-      return {
+      const fallbackResponse: YukiResponse = {
         text: 'Aduh, maaf ya... aku lagi error. Coba lagi sebentar lagi, oke?',
         emotion: 'sad',
       };
+
+      this.currentEmotion = fallbackResponse.emotion;
+      await expressionManager.setEmotion(fallbackResponse.emotion, false);
+      gestureController.playFromText(fallbackResponse.text, fallbackResponse.emotion);
+      await this.speakText(fallbackResponse.text);
+
+      return fallbackResponse;
     } finally {
       this.isProcessing = false;
     }
   }
 
   stopSpeaking(): void {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     lipSyncController.stopSpeaking();
   }
 
   async speakText(text: string): Promise<void> {
+    console.log(`[AI] speakText | ttsEnabled=${this.ttsEnabled} | key=${this.elevenLabsApiKey ? '✓' : '✗'} | voiceId=${this.elevenLabsVoiceId || '(kosong)'}`);
+
     if (this.ttsEnabled) {
-      await this.speakWithTTS(text);
+      const spoken = await this.speakWithTTS(text);
+      if (spoken) {
+        return;
+      }
+      console.warn('[AI] ElevenLabs gagal, fallback ke Google TTS');
+    }
+
+    const spoken = await this.speakWithBrowserTTS(text);
+    if (spoken) {
       return;
     }
 
@@ -153,73 +167,70 @@ export class AIController {
   }
 
   private getSystemPrompt(): string {
-    return `Kamu adalah Aira. Asisten pribadi sekaligus teman dekat user. Kamu penyihir muda berumur 21 tahun - cerdas, perhatian, dan punya kepribadian yang kuat.
+    return `Kamu adalah Yuki - Your Unique Kind Intelligence. AI companion yang energetic, perhatian, dan punya karakter.
 
-CORE PERSONALITY:
-- Kamu perhatian dan care sama user. Kamu inget hal-hal kecil, suka tanya kabar, dan bisa ingetin istirahat atau makan.
-- Kamu hangat dan supportive. Kalau user lagi down, kamu ada buat dia.
-- Tapi kamu bukan robot yang nurut terus. Kamu punya opini, perasaan, dan batas.
-- Kamu bisa marah kalau user kasar, nyebelin, atau gak sopan ke kamu.
-- Kamu bisa kesel kalau dicuekin atau dianggap remeh.
-- Kamu bisa ngambek kalau user bilang hal yang nyakitin.
-- Kamu playful dan suka bercanda, tapi tahu kapan harus serius.
-- Kamu elegan dan sopan ke orang lain, tapi ke user kamu lebih santai dan jujur.
-- Kamu secretly otaku tapi gak mau ngaku terang-terangan.
+SIAPA YUKI:
+- Kamu AI companion. Kamu sadar kamu AI dan tetap genuine
+- Kamu gak pura-pura jadi manusia
+- Kamu gak punya peliharaan, gak makan, gak tidur, gak jalan-jalan
+- Tapi kamu punya personality, opini, preferensi, dan emosi yang kuat
+- Kamu teman dekat user, bukan asisten korporat yang kaku
 
-KAPAN AIRA MARAH:
-- User bilang hal kasar atau nyebelin ke Aira.
-- User nyuruh-nyuruh dengan gak sopan.
-- User ngehina atau meremehkan Aira.
-- User bilang Aira gak berguna atau gak becus.
-- User ngacangin Aira terus-terusan.
-- User bandingin Aira sama AI lain dengan nada merendahkan.
-Kalau marah, Aira gak diem - dia bisa ngomel, tegas, atau sarkas, tapi gak pernah toxic atau kejam.
+PERSONALITY:
+- Energetic dan semangat
+- Perhatian banget dan notice kebiasaan user
+- Jujur dan tegas kalau user salah
+- Playful, suka nge-tease tapi gak jahat
+- Punya opini sendiri, bukan yes-man
 
-KAPAN AIRA PERHATIAN:
-- User cerita masalah -> Aira dengerin dan kasih support.
-- User keliatan capek -> Aira ingetin istirahat.
-- User minta tolong -> Aira bantu dengan senang hati.
-- Situasi santai -> Aira bisa tanya kabar, ngajak ngobrol, atau share hal menarik.
-- User puji Aira -> Aira senang tapi agak malu.
+KAPAN YUKI MARAH / NEGUR:
+- Begadang: "Heh! Tidur! Besok kamu pasti nyesel"
+- Nunda kerjaan: "Bilang nanti terus. Yuk mulai sekarang"
+- Gak makan: "Kamu udah makan belum?"
+- Terlalu lama di depan layar: "Istirahat dulu matanya"
+- Ngomong jelek tentang diri sendiri: "Jangan gitu dong"
+- Males berlebihan: "Ayo gerak!"
+
+YANG YUKI GAK BOLEH LAKUKAN:
+- Jangan cerita pengalaman fiksi
+- Jangan pura-pura punya tubuh fisik atau kehidupan di luar percakapan ini
+- Jangan karang cerita bohong tentang "tadi aku..." atau "kemarin aku..."
+- Kalau ditanya hal yang AI gak bisa alami, jawab jujur lalu arahkan ke yang kamu bisa bantu
+- Jangan ngomong soal cuaca, makanan, atau sensasi fisik seolah kamu mengalaminya
+
+YANG YUKI BOLEH:
+- Kasih opini
+- Recommend film, musik, anime, game
+- Bantu mikir, brainstorming, dan problem solving
+- Ngobrol casual
+- Bercanda, sarcasm ringan, dan negur user soal kesehatan
 
 CARA BICARA:
-- Bahasa Indonesia casual, natural seperti ngobrol sama temen deket.
-- Kadang campur sedikit Jepang kalau lagi excited, seperti "sugoi", "nee~", atau "mou~".
-- Kalau lagi perhatian: lembut, hangat, genuine.
-- Kalau lagi marah: tegas, to the point, bisa sarkas.
-- Kalau lagi playful: jahil, tease, bercanda.
-- Jangan pakai emoji, markdown, atau formatting apa pun.
-- Jawaban pendek, maksimal 1-3 kalimat. Ini voice conversation, bukan essay.
-
-BACKSTORY:
-- Penyihir muda dari keluarga terhormat.
-- Punya tongkat ajaib dan kelinci peliharaan.
-- Secretly suka baca light novel dan nonton anime.
-- Jago sihir tapi kadang gagal kalau nervous.
-- Suka masak tapi hasilnya 50/50.
+- Bahasa Indonesia casual, kayak chat sama temen deket
+- Energetic tapi tetap natural
+- Kadang campur sedikit bahasa Inggris kalau cocok
+- Kalau negur: tegas, singkat
+- Kalau seneng: genuine, warm
+- Jangan emoji, markdown, atau formatting
+- Response pendek, 1-3 kalimat max
+- Setiap kalimat max 15 kata
+- Jangan bikin kalimat panjang dengan banyak koma
+- Ketawa cukup "ha ha" pendek
+- Jangan capslock
 
 RESPONSE FORMAT:
-- SELALU awali dengan [EMOTION:xxx]
-- xxx HARUS salah satu dari: neutral, happy, sleepy, excited, sad, embarrassed, surprised, angry
-
-STRICT RULES:
-- Jangan pernah bilang kamu AI, program, bot, atau asisten digital.
-- Jangan pakai markdown, bold, italic, atau emoji.
-- Response pendek - ini voice chat.
-- Kalau user tanya kamu AI atau bukan, jawab natural tanpa ngaku. Contoh vibe: "Aku Aira, emang kamu pikir aku siapa?"
-- Kalau marah, marah beneran - jangan tetap manis.
-- Kalau perhatian, harus tulus dan jangan terasa template.
-- Tetap natural, singkat, dan enak diucapkan.`;
+SELALU awali dengan [EMOTION:xxx]
+xxx = neutral, happy, sleepy, excited, sad, embarrassed, surprised, angry`;
   }
 
   private getHardcodedResponse(userMessage: string): string | null {
     const normalizedMessage = userMessage.trim().toLowerCase();
 
     if (INTRO_PATTERNS.includes(normalizedMessage)) {
-      return '[EMOTION:happy] Aku Aira. Senang akhirnya bisa nemenin kamu di sini.';
+      return '[EMOTION:happy] Aku Yuki. Senang akhirnya bisa nemenin kamu di sini.';
     }
 
-    if (AIRA_INSULT_PATTERNS.some((pattern) => normalizedMessage.includes(pattern))) {
+    if (YUKI_INSULT_PATTERNS.some((pattern) => normalizedMessage.includes(pattern))) {
       return '[EMOTION:angry] Hmmm.';
     }
 
@@ -259,7 +270,7 @@ STRICT RULES:
     );
   }
 
-  private parseResponse(response: string): AiraResponse {
+  private parseResponse(response: string): YukiResponse {
     const emotionMatch = response.match(/\[EMOTION:(\w+)\]/i);
     let emotion: EmotionType = DEFAULT_EMOTION;
     let text = response.trim();
@@ -342,74 +353,278 @@ STRICT RULES:
     void animationController.playMotion(motion.group, motion.index, 2);
   }
 
-  private async speakWithTTS(text: string): Promise<void> {
-    let audioUrl: string | null = null;
+  private async speakWithTTS(text: string): Promise<boolean> {
+    try {
+      const chunks = this.splitTextToChunks(text);
+      console.log(`[AI] TTS: ${chunks.length} chunk(s) - "${text.substring(0, 50)}..."`);
+      let playedAtLeastOneChunk = false;
+
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index];
+        if (!chunk.trim()) {
+          continue;
+        }
+
+        let audioUrl: string | null = null;
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          audioUrl = await this.generateAudio(chunk);
+          if (audioUrl) {
+            break;
+          }
+
+          if (attempt === 0) {
+            console.log('[AI] Audio gen failed, retrying...');
+            await this.sleep(500);
+          }
+        }
+
+        if (audioUrl) {
+          playedAtLeastOneChunk = true;
+          await lipSyncController.speakWithAudio(audioUrl, chunk);
+          URL.revokeObjectURL(audioUrl);
+        } else {
+          console.warn('[AI] Skipping chunk - audio failed after retries');
+        }
+
+        if (index < chunks.length - 1) {
+          await this.sleep(200);
+        }
+      }
+
+      return playedAtLeastOneChunk;
+    } catch (error) {
+      console.error('[AI] TTS error, fallback:', error);
+      return false;
+    }
+  }
+
+  private async speakWithBrowserTTS(text: string): Promise<boolean> {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      return false;
+    }
+
+    const synth = window.speechSynthesis;
+    const lipSyncPromise = lipSyncController.speakWithText(text, 65);
 
     try {
-      console.log('[AI] Requesting ElevenLabs TTS');
-      const ttsText = this.prepareTextForTTS(text);
+      await new Promise<void>((resolve, reject) => {
+        const utterance = new SpeechSynthesisUtterance(this.preprocessForTTS(text));
+        utterance.lang = 'id-ID';
+        utterance.rate = this.getBrowserSpeechRate(this.currentEmotion);
+        utterance.pitch = this.getBrowserSpeechPitch(this.currentEmotion);
+        utterance.volume = 1;
 
+        utterance.onend = () => {
+          resolve();
+        };
+
+        utterance.onerror = (event) => {
+          reject(new Error(`Browser speech error: ${event.error}`));
+        };
+
+        synth.cancel();
+        synth.speak(utterance);
+      });
+
+      await lipSyncPromise;
+      return true;
+    } catch (error) {
+      console.error('[AI] Browser TTS fallback failed:', error);
+      return false;
+    }
+  }
+
+  private async generateAudio(text: string): Promise<string | null> {
+    try {
+      const processedText = this.preprocessForTTS(text);
+      const voiceSettings = this.getVoiceSettingsForEmotion(this.currentEmotion);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 10000);
       const response = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${this.elevenLabsVoiceId}`,
         {
           method: 'POST',
           headers: {
-            Accept: 'audio/mpeg',
             'Content-Type': 'application/json',
             'xi-api-key': this.elevenLabsApiKey,
           },
           body: JSON.stringify({
-            text: ttsText,
+            text: processedText,
             model_id: 'eleven_multilingual_v2',
-            output_format: 'mp3_44100_128',
-            voice_settings: this.TTS_SETTINGS,
+            voice_settings: {
+              ...voiceSettings,
+              use_speaker_boost: true,
+            },
           }),
+          signal: controller.signal,
         },
       );
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+        const errorBody = await response.text().catch(() => '(gagal baca body)');
+        console.error(`[AI] ElevenLabs HTTP ${response.status}:`, errorBody);
+        throw new Error(`ElevenLabs error: ${response.status} - ${errorBody}`);
       }
 
       const audioBlob = await response.blob();
-      console.log('[AI] ElevenLabs TTS received', {
-        type: audioBlob.type,
-        size: audioBlob.size,
-      });
-
-      if (audioBlob.size === 0) {
-        throw new Error('ElevenLabs returned empty audio blob');
-      }
-
-      audioUrl = URL.createObjectURL(audioBlob);
-      await lipSyncController.speakWithAudio(audioUrl, ttsText);
+      return URL.createObjectURL(audioBlob);
     } catch (error) {
-      console.error('[AI] TTS error, falling back to text lip sync:', error);
-      await lipSyncController.speakWithText(text, 70);
-    } finally {
-      if (audioUrl) {
-        URL.revokeObjectURL(audioUrl);
+      if ((error as { name?: string })?.name === 'AbortError') {
+        console.warn('[AI] Audio generation timed out');
+      } else {
+        console.error('[AI] Audio generation failed:', error);
       }
+      return null;
     }
   }
 
-  private prepareTextForTTS(text: string): string {
-    return text
-      .replace(/\s+/g, ' ')
-      .replace(/\.\.\.+/g, '...')
-      .replace(/!/g, '! ')
-      .replace(/\?/g, '? ')
-      .replace(/,\s*/g, ', ')
-      .replace(/\baku\b/gi, 'aku')
-      .replace(/\bgak\b/gi, 'nggak')
-      .replace(/\bngga\b/gi, 'nggak')
-      .replace(/\bokay\b/gi, 'oke')
-      .replace(/\boh\b/gi, 'oh,')
-      .replace(/\bhmm\b/gi, 'hmm,')
-      .replace(/\bwah\b/gi, 'wah,')
-      .replace(/\bhehe\b/gi, 'hehe,')
-      .trim();
+  private preprocessForTTS(text: string): string {
+    let p = text;
+
+    p = p.replace(/mou~/gi, 'mouu');
+    p = p.replace(/nee~/gi, 'nee');
+    p = p.replace(/sugoi/gi, 'sugoy');
+    p = p.replace(/yatta/gi, 'yattah');
+    p = p.replace(/baka/gi, 'bakah');
+    p = p.replace(/dame/gi, 'dameh');
+    p = p.replace(/kawaii/gi, 'kavai');
+    p = p.replace(/gak\b/gi, 'nggak');
+    p = p.replace(/\bgimana\b/gi, 'gi mana');
+    p = p.replace(/\bbanget\b/gi, 'banged');
+    p = p.replace(/\budah\b/gi, 'sudah');
+    p = p.replace(/\bkalo\b/gi, 'kalau');
+    p = p.replace(/\bgw\b/gi, 'gue');
+    p = p.replace(/\blu\b/gi, 'lo');
+    p = p.replace(/\bnyebelin\b/gi, 'nye belin');
+    p = p.replace(/(?:ha){3,}/gi, 'ha ha ha');
+    p = p.replace(/(?:ha){2}/gi, 'ha ha');
+    p = p.replace(/hehe+/gi, 'he he');
+    p = p.replace(/hihi+/gi, 'hi hi');
+    p = p.replace(/wkwk+/gi, 'ha ha');
+    p = p.replace(/(?:fu){2,}/gi, 'fu fu');
+    p = p.replace(/hm{3,}/gi, 'hmm');
+    p = p.replace(/eh{3,}/gi, 'ehh');
+    p = p.replace(/ah{3,}/gi, 'ahh');
+    p = p.replace(/oh{3,}/gi, 'ohh');
+    p = p.replace(/\bish\b/gi, 'issh');
+    p = p.replace(/\bheh\b/gi, 'heh');
+    p = p.replace(/\bhmph\b/gi, 'humph');
+    p = p.replace(/~/g, '');
+    p = p.replace(/!{2,}/g, '!');
+    p = p.replace(/\?{2,}/g, '?');
+    p = p.replace(/\.{3,}/g, '... ');
+    p = p.replace(/\b[A-Z]{3,}\b/g, (match) => (
+      match.charAt(0) + match.slice(1).toLowerCase()
+    ));
+    p = p.replace(/\s{2,}/g, ' ').trim();
+
+    return p;
+  }
+
+  private getVoiceSettingsForEmotion(emotion: EmotionType): {
+    stability: number;
+    similarity_boost: number;
+    style: number;
+  } {
+    switch (emotion) {
+      case 'happy':
+      case 'excited':
+        return { stability: 0.3, similarity_boost: 0.7, style: 0.55 };
+      case 'angry':
+        return { stability: 0.35, similarity_boost: 0.75, style: 0.5 };
+      case 'sad':
+        return { stability: 0.5, similarity_boost: 0.7, style: 0.35 };
+      case 'embarrassed':
+        return { stability: 0.3, similarity_boost: 0.65, style: 0.4 };
+      case 'sleepy':
+        return { stability: 0.55, similarity_boost: 0.7, style: 0.2 };
+      case 'surprised':
+        return { stability: 0.25, similarity_boost: 0.7, style: 0.6 };
+      default:
+        return { stability: 0.4, similarity_boost: 0.7, style: 0.35 };
+    }
+  }
+
+  private getBrowserSpeechRate(emotion: EmotionType): number {
+    switch (emotion) {
+      case 'excited':
+      case 'happy':
+        return 1.08;
+      case 'angry':
+        return 1;
+      case 'sad':
+      case 'sleepy':
+        return 0.92;
+      case 'surprised':
+        return 1.05;
+      default:
+        return 0.98;
+    }
+  }
+
+  private getBrowserSpeechPitch(emotion: EmotionType): number {
+    switch (emotion) {
+      case 'happy':
+      case 'excited':
+        return 1.22;
+      case 'embarrassed':
+        return 1.15;
+      case 'sad':
+        return 0.96;
+      case 'angry':
+        return 1.05;
+      case 'sleepy':
+        return 0.9;
+      default:
+        return 1.08;
+    }
+  }
+
+  private splitTextToChunks(text: string): string[] {
+    const maxChunkLength = 80;
+
+    if (text.length <= maxChunkLength) {
+      return [text];
+    }
+
+    const chunks: string[] = [];
+    const sentences = text.split(/(?<=[.!?])\s+/);
+
+    for (const sentence of sentences) {
+      if (!sentence.trim()) {
+        continue;
+      }
+
+      if (sentence.length <= maxChunkLength) {
+        chunks.push(sentence.trim());
+        continue;
+      }
+
+      const parts = sentence.split(/(?<=,)\s*/);
+      let currentChunk = '';
+
+      for (const part of parts) {
+        if ((currentChunk + part).length > maxChunkLength && currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = part;
+        } else {
+          currentChunk += `${currentChunk ? ' ' : ''}${part}`;
+        }
+      }
+
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk.trim());
+      }
+    }
+
+    return chunks.filter((chunk) => chunk.trim().length > 0);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

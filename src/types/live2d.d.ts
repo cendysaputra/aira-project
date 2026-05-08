@@ -1,6 +1,6 @@
 /// <reference types="pixi.js" />
 
-declare module 'pixi-live2d-display' {
+declare module 'pixi-live2d-display-lipsyncpatch' {
   import * as PIXI from 'pixi.js';
 
   export class Live2DModel extends PIXI.Sprite {
@@ -11,6 +11,20 @@ declare module 'pixi-live2d-display' {
     motion(group: string, index?: number, priority?: number): Promise<boolean>;
 
     expression(index?: number | string): Promise<boolean>;
+
+    speak(
+      audioUrl: string,
+      options?: {
+        volume?: number;
+        expression?: number | string;
+        resetExpression?: boolean;
+        crossOrigin?: string;
+        onFinish?: () => void;
+        onError?: (e: any) => void;
+      }
+    ): void;
+
+    stopSpeaking(): void;
 
     readonly lipSync: boolean;
 
@@ -39,6 +53,6 @@ declare module 'pixi-live2d-display' {
   };
 }
 
-declare module 'pixi-live2d-display/cubism4' {
-  export * from 'pixi-live2d-display';
+declare module 'pixi-live2d-display-lipsyncpatch/cubism4' {
+  export * from 'pixi-live2d-display-lipsyncpatch';
 }

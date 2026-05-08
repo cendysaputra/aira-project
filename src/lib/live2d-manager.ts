@@ -1,5 +1,5 @@
 import * as PIXI from 'pixi.js';
-import { Live2DModel, MotionPreloadStrategy } from 'pixi-live2d-display/cubism4';
+import { Live2DModel, MotionPreloadStrategy } from 'pixi-live2d-display-lipsyncpatch/cubism4';
 
 declare global {
   interface Window {
@@ -76,14 +76,13 @@ export class Live2DManager {
 
     const { width, height } = this.app.renderer.screen;
 
-    // Reset scale first so bounds are measured from the original model size.
+    // Reset dulu biar ukuran aslinya kebaca benar.
     this.model.scale.set(1);
 
     const bounds = this.model.getLocalBounds();
     const modelWidth = bounds.width || 1;
     const modelHeight = bounds.height || 1;
 
-    // Keep the full character visible with a bit of breathing room.
     const scale = Math.min((width * 1) / modelWidth, (height * 2) / modelHeight);
 
     const pivotX = bounds.x + bounds.width / 2;
@@ -92,8 +91,7 @@ export class Live2DManager {
     this.model.scale.set(scale);
     this.model.pivot.set(pivotX, pivotY);
 
-    // Slight visual compensation: the brush and side accessories make the raw bounds
-    // feel left-heavy, so nudge the character a little to the right and lower.
+    // Model ini terasa agak berat ke kiri, jadi digeser dikit biar center-nya enak.
     this.model.x = width / 2 + width * 0.02;
     this.model.y = height / 2 - height * 0.12;
   }

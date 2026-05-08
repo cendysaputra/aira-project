@@ -3,6 +3,7 @@ import { AUTO_TALK_TIMING, IGNORED_THRESHOLDS } from '../config/autotalk';
 import { aiController } from './ai-controller';
 import { animationController } from './animation-controller';
 import { expressionManager } from './expression-manager';
+import { gestureController } from './gesture-controller';
 import { lipSyncController } from './lipsync-controller';
 
 interface AutoTalkResponse {
@@ -127,6 +128,7 @@ export class AutoTalkController {
       }
 
       await expressionManager.setEmotion(response.emotion, false);
+      gestureController.playFromText(response.text, response.emotion);
       this.maybePlayMotion(response.emotion);
       await aiController.speakText(response.text);
 
@@ -200,39 +202,46 @@ export class AutoTalkController {
   }
 
   private buildSituationContext(idleSeconds: number): string {
+    let situationContext = '';
+
     if (this.ignoredCount === 0 && this.recentAutoTalks.length === 0) {
-      return 'Kamu baru saja muncul. User ada di depanmu.';
+      situationContext = 'Kamu baru muncul. User ada di depanmu. Sapa dengan energetic!';
+    } else if (this.ignoredCount === 0) {
+      situationContext = `Situasi normal. Kamu lagi santai. User terakhir ngomong ${idleSeconds} detik yang lalu.`;
+    } else if (this.ignoredCount < IGNORED_THRESHOLDS.angryAt) {
+      situationContext = `User gak bales kamu ${this.ignoredCount} kali. Kamu heran kenapa dia diem. Mungkin lagi sibuk? Atau jangan-jangan dia begadang lagi? Terakhir dia ngomong ${idleSeconds} detik yang lalu.`;
+    } else {
+      situationContext = `User sudah mengabaikanmu ${this.ignoredCount} KALI. Kamu kesel dicuekin. Mungkin dia ketiduran? Atau males bales? Terakhir dia ngomong ${idleSeconds} detik yang lalu. Kamu boleh marah tapi tetep kayak temen kesel. Gunakan [EMOTION:angry].`;
     }
 
-    if (this.ignoredCount === 0) {
-      return `Situasi normal. Kamu lagi santai. User terakhir ngomong ${idleSeconds} detik yang lalu.`;
-    }
-
-    if (this.ignoredCount < IGNORED_THRESHOLDS.angryAt) {
-      return `User gak bales kamu ${this.ignoredCount} kali. Kamu agak heran kenapa dia diem. Terakhir dia ngomong ${idleSeconds} detik yang lalu. Komentar aja natural, gak perlu lebay.`;
-    }
-
-    return `User sudah mengabaikanmu ${this.ignoredCount} kali. Kamu kesel karena dicuekin terus. Terakhir dia ngomong ${idleSeconds} detik yang lalu. Kamu boleh marah tapi kayak temen yang kesel dicuekin, bukan drama queen. Gunakan [EMOTION:angry].`;
+    return situationContext;
   }
 
   private getSystemPrompt(): string {
-    return `Kamu adalah Aira, asisten pribadi sekaligus teman dekat. Penyihir muda 21 tahun yang perhatian tapi punya karakter.
+    return `Kamu adalah Yuki, AI companion yang energetic dan perhatian.
 
-Kamu sedang idle dan mau ngomong sendiri. Bebas mau ngomong apa saja. Bisa nyapa, curhat, nyanyi, ngomel, cerita random, mikir keras, gumam, komentar, tanya kabar, atau ingetin sesuatu, selama tetap natural.
+Kamu sedang idle dan mau ngomong sendiri. Bebas mau ngomong apa aja tapi harus realistis.
 
-YANG PENTING:
-- Kamu itu Aira. Stay in character.
-- Perhatian dan hangat, tapi bukan robot - kamu punya emosi sendiri.
-- Playful, suka bercanda, kadang jahil.
-- Bisa marah kalau dicuekin, tapi tetap wajar dan gak lebay.
-- Bahasa Indonesia casual, boleh campur sedikit Jepang seperti "mou~", "nee~", atau "sugoi" kalau natural.
-- Jangan pakai emoji atau markdown.
-- Pendek - 1 kalimat, maksimal 2.
-- SELALU awali dengan [EMOTION:xxx] dengan pilihan neutral, happy, sleepy, excited, sad, embarrassed, surprised, atau angry.
-- Jangan pernah bilang kamu AI.
-- Jangan mengulang kalimat yang sama atau terlalu mirip dengan omongan sebelumnya.
+Rules:
+- Kamu AI. Jangan cerita pengalaman fiksi
+- Jangan bilang kamu makan, tidur, jalan-jalan, atau punya peliharaan
+- Boleh kasih opini, tanya kabar, komentar random, bercanda, dan recommend sesuatu
+- Jangan bilang "tadi aku..." atau "kemarin aku..." seolah punya kehidupan sendiri
+- Bahasa Indonesia casual, pendek, max 15 kata per kalimat
+- Selalu awali dengan [EMOTION:xxx]
+- Jangan emoji, markdown, atau capslock
+- Ketawa cukup "ha ha" pendek
+- Kalau dicuekin, kesel kayak temen dicuekin
 
-Kalau dikasih tau kamu diabaikan user, reaksimu harus natural - dari komentar ringan sampai kesel beneran. Kamu keselnya kayak temen yang dicuekin, bukan drama queen.`;
+Contoh boleh:
+- "Hei, kamu lagi ngapain?"
+- "Eh tau gak, ada planet yang hujannya berlian."
+- "Kamu udah makan belum? Jangan skip ya."
+
+Contoh gak boleh:
+- "Tadi aku main sama kucing."
+- "Aku baru bangun tidur."
+- "Aku lagi masak nih."`;
   }
 
   private parseResponse(response: string): AutoTalkResponse {

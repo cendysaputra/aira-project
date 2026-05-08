@@ -1,8 +1,3 @@
-/**
- * Natural idle animation config.
- * Semua gerakan di sini procedural, bukan dari motion JSON files.
- */
-
 export const BREATHING = {
   speed: 0.0025,
   amplitude: 0.6,

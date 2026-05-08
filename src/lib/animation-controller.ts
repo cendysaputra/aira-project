@@ -1,4 +1,4 @@
-import type { Live2DModel } from 'pixi-live2d-display/cubism4';
+import type { Live2DModel } from 'pixi-live2d-display-lipsyncpatch/cubism4';
 import {
   BODY_SWAY,
   BREATHING,
@@ -55,6 +55,7 @@ export class AnimationController {
   private targetMix: IdleLayerMix = { head: 0.45, body: 0.15, arm: 0.2, overall: 0.2 };
   private currentPose: IdlePose = this.createZeroPose();
   private targetPose: IdlePose = this.createZeroPose();
+  private gestureActive = false;
 
   private phaseOffsets = {
     headX: Math.random() * 10000,
@@ -124,9 +125,14 @@ export class AnimationController {
   }
 
   private applyHeadMotion(coreModel: CoreModelLike, t: number): void {
+    if (this.gestureActive) {
+      return;
+    }
+
     const profile = this.getEmotionProfile();
     const speakDampen = this.isSpeaking ? 0.4 : 1;
     const idleMix = this.currentMix.head;
+
     const hx = HEAD_MOTION.angleX;
     const hy = HEAD_MOTION.angleY;
     const hz = HEAD_MOTION.angleZ;
@@ -167,6 +173,10 @@ export class AnimationController {
   }
 
   private applyBodySway(coreModel: CoreModelLike, t: number): void {
+    if (this.gestureActive) {
+      return;
+    }
+
     const profile = this.getEmotionProfile();
     const speakDampen = this.isSpeaking ? 0.15 : 1;
     const idleMix = this.currentMix.body;
@@ -244,6 +254,10 @@ export class AnimationController {
   }
 
   private applyEyeLook(coreModel: CoreModelLike, now: number): void {
+    if (this.gestureActive) {
+      return;
+    }
+
     const profile = this.getEmotionProfile();
 
     if (now >= this.nextEyeMoveTime) {
@@ -282,6 +296,10 @@ export class AnimationController {
   }
 
   private applyBrowMotion(coreModel: CoreModelLike, t: number): void {
+    if (this.gestureActive) {
+      return;
+    }
+
     const profile = this.getEmotionProfile();
     const { amplitude, speed1, speed2 } = BROW_MOTION;
 
@@ -352,6 +370,10 @@ export class AnimationController {
 
   setSpeaking(speaking: boolean): void {
     this.isSpeaking = speaking;
+  }
+
+  setGestureActive(active: boolean): void {
+    this.gestureActive = active;
   }
 
   private getEmotionProfile() {
@@ -490,7 +512,7 @@ export class AnimationController {
     try {
       coreModel.setParameterValueById(paramId, value);
     } catch {
-      // Ignore parameters that do not exist on the model.
+      // Model beda bisa punya param yang beda juga.
     }
   }
 
@@ -502,6 +524,7 @@ export class AnimationController {
       this.animationId = null;
     }
 
+    this.gestureActive = false;
     this.model = null;
   }
 }

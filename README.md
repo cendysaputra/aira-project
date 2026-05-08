@@ -1,8 +1,8 @@
-# Aira
+# Yuki
 
-Aira is an anime-styled virtual agent you can have natural conversations with. The project combines an interactive Live2D model, Claude-powered AI, and ElevenLabs voice synthesis into a single conversational experience that feels alive.
+Yuki is an anime-styled virtual agent you can have natural conversations with. The project combines an interactive Live2D model, Claude-powered AI, and ElevenLabs voice synthesis into a single conversational experience that feels alive.
 
-Aira has a consistent personality, reactive facial expressions, and a voice synchronized with real-time lip movements. Every response triggers matching emotion expressions and body animations. Conversations happen in casual Indonesian, feeling more like chatting with a friend than talking to a formal assistant.
+Yuki has a consistent personality, reactive facial expressions, and a voice synchronized with real-time lip movements. Every response triggers matching emotion expressions and body animations. Conversations happen in casual Indonesian, feeling more like chatting with a friend than talking to a formal assistant.
 
 ## Features
 
